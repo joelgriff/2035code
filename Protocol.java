@@ -3,8 +3,10 @@
  * c230184125
  */
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
@@ -73,7 +75,26 @@ public class Protocol {
 	 */
 	public void sendMetadata() {
 		System.exit(0);
-	}
+		try {
+			MetaData metaData = new MetaData();
+			metaData.setSize(this.fileSize);
+			metaData.setName(this.outputFileName);
+			metaData.setMaxSegSize(this.maxPayload);
+
+
+			ByteArrayOutputStream byteAOutputStream = new ByteArrayOutputStream();
+			ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteAOutputStream);
+			objectOutputStream.writeObject(metaData);
+
+
+
+
+
+
+		} catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
 	/* 
 	 * This method:
