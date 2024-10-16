@@ -7,10 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
+import java.net.*;
 
 public class Protocol {
 
@@ -85,6 +82,20 @@ public class Protocol {
 			ByteArrayOutputStream byteAOutputStream = new ByteArrayOutputStream();
 			ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteAOutputStream);
 			objectOutputStream.writeObject(metaData);
+			objectOutputStream.flush();
+			byte[] metaDataBytes = byteAOutputStream.toByteArray();
+
+			DatagramPacket metaPacket = new DatagramPacket(
+					metaDataBytes,
+					metaDataBytes.length,
+					ipAddress,
+					portNumber
+			);
+
+
+
+
+
 
 
 
