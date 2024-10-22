@@ -99,7 +99,7 @@ public class Protocol {
 					outputStream.close();
 				}
 			} catch (IOException e) {
-				System.err.println("CLIENT: Error closing resources: " + e.getMessage());
+				System.err.println("CLIENT --> Error with closing resources: " + e.getMessage());
 			}
 		}
 	}
@@ -116,20 +116,20 @@ public class Protocol {
 	 * The method returns -1 if this is the last data segment (no more data to be read) and 0 otherwise.
 	 */
 	public int readData() throws IOException {
-		byte[] Buffer = new byte[maxPayload];
-		int ReadBytes = InputStream.nullInputStream().read(Buffer);
+		byte[] TotalPayload = new byte[maxPayload];
+		int ReadBytes = InputStream.nullInputStream().read(TotalPayload);
 		int sequenceNum = 0;
 
 		if (ReadBytes == -1) {
 			return -1;
 		}
 
-		dataSeg.setPayLoad(new String(Buffer, 0, ReadBytes));
+		dataSeg.setPayLoad(new String(TotalPayload, 0, ReadBytes));
 		dataSeg.setSize(ReadBytes);
-		dataSeg.setSq(sequenceNum++);
-
+		dataSeg.setSq(sequenceNum);
 		dataSeg.setType(SegmentType.Data);
 
+		sequenceNum = (sequenceNum + 1) % 2;
         return 0;
     }
 
@@ -139,6 +139,12 @@ public class Protocol {
 	 * 		computes a checksum of the data and sets the data segment's checksum prior to sending. 
 	 * output relevant information messages for the user to follow progress of the file transfer.
 	 */
+
+	public Segment getCurrentSeg() {
+		return dataSeg;
+	}
+
+
 	public void sendData()  {
 		System.exit(0);
 	} 
