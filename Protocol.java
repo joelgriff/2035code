@@ -3,39 +3,36 @@
  * c230184125
  */
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.ObjectOutputStream;
+import java.io.*;
 import java.net.*;
 
 public class Protocol {
 
-	static final String  NORMAL_MODE="nm"   ; // normal transfer mode: (for Part 1 and 2)
-	static final String	 TIMEOUT_MODE ="wt"  ; // timeout transfer mode: (for Part 3)
-	static final String	 GBN_MODE ="gbn"  ;    // GBN transfer mode: (for Part 4)
-	static final int DEFAULT_TIMEOUT =10  ;     // default timeout in seconds (for Part 3)
-	static final int DEFAULT_RETRIES =4  ;    // default number of consecutive retries (for Part 3)
+	static final String NORMAL_MODE = "nm"; // normal transfer mode: (for Part 1 and 2)
+	static final String TIMEOUT_MODE = "wt"; // timeout transfer mode: (for Part 3)
+	static final String GBN_MODE = "gbn";    // GBN transfer mode: (for Part 4)
+	static final int DEFAULT_TIMEOUT = 10;     // default timeout in seconds (for Part 3)
+	static final int DEFAULT_RETRIES = 4;    // default number of consecutive retries (for Part 3)
 
 	/*
-	 * The following attributes control the execution of a transfer protocol and provide access to the 
-	 * resources needed for a file transfer (such as the file to transfer, etc.)	   
-	 * 
-	 */ 
+	 * The following attributes control the execution of a transfer protocol and provide access to the
+	 * resources needed for a file transfer (such as the file to transfer, etc.)
+	 *
+	 */
 
 	private InetAddress ipAddress;      // the address of the server to transfer the file to. This should be a well-formed IP address.
-	private int portNumber; 		    // the  port the server is listening on
+	private int portNumber;            // the  port the server is listening on
 	private DatagramSocket socket;     // The socket that the client bind to
 	private String mode;               //mode of transfer normal/with timeout/GBN
 
 	private File inputFile;           // The client-side input file to transfer  
 	private String inputFileName;      // the name of the client-side input file for transfer to the server
-	private String outputFileName ;    //the name of the output file to create on the server as a result of the file transfer
+	private String outputFileName;    //the name of the output file to create on the server as a result of the file transfer
 	private long fileSize;            // the size of the client-side input file  
 
-	private Segment dataSeg   ;         // the protocol data segment for sending segments with payload read from the input file to the server 
-	private Segment ackSeg  ;           //the protocol ack segment for receiving ACKs from the server
-	private int maxPayload;				//The max payload size of the data segment
+	private Segment dataSeg;         // the protocol data segment for sending segments with payload read from the input file to the server
+	private Segment ackSeg;           //the protocol ack segment for receiving ACKs from the server
+	private int maxPayload;                //The max payload size of the data segment
 	private long remainingBytes;       //the number of bytes remaining to be transferred during execution of a transfer. This is set to the input file size at the start
 
 	private int timeout;          //the timeout in seconds to use for the protocol with timeout (for Part 3)
@@ -60,52 +57,53 @@ public class Protocol {
 	 * Do not change any method signatures and do not change any other methods or code provided.
 	 ***************************************************************************************************************************************
 	 **************************************************************************************************************************************/
-	/* 
-	 * This method sends protocol metadata to the server.	
+	/*
+	 * This method sends protocol metadata to the server.
 	 * Sending metadata starts a transfer by sending the following information to the server in the metadata object (defined in MetaData.java):
-	 *      size - the size of the file to send 
+	 *      size - the size of the file to send
 	 *      name - the name of the file to create on the server
 	 *      maxSegSize - The size of the payload of the data segment
 	 * deal with error in sending
 	 * output relevant information messages for the user to follow progress of the file transfer.
-	 * This method does not set any of the attributes of the protocol.	  
+	 * This method does not set any of the attributes of the protocol.
 	 */
 	public void sendMetadata() {
-		System.exit(0);
+		MetaData metaData = new MetaData();
+		metaData.setName(inputFileName);
+		metaData.setSize(fileSize);
+		metaData.setMaxSegSize(this.maxPayload);
+
+		ByteArrayOutputStream outputStream = null;
+		ObjectOutputStream objectOutputStream = null;
 		try {
-			MetaData metaData = new MetaData();
-			metaData.setSize(this.fileSize);
-			metaData.setName(this.outputFileName);
-			metaData.setMaxSegSize(this.maxPayload);
 
+			outputStream = new ByteArrayOutputStream();
+			objectOutputStream = new ObjectOutputStream(outputStream);
 
-			ByteArrayOutputStream byteAOutputStream = new ByteArrayOutputStream();
-			ObjectOutputStream objectOutputStream = new ObjectOutputStream(byteAOutputStream);
 			objectOutputStream.writeObject(metaData);
-			objectOutputStream.flush();
-			byte[] metaDataBytes = byteAOutputStream.toByteArray();
+			byte[] ToSend = outputStream.toByteArray();
 
-			DatagramPacket metaPacket = new DatagramPacket(
-					metaDataBytes,
-					metaDataBytes.length,
-					ipAddress,
-					portNumber
-			);
+			DatagramPacket Data_packet = new DatagramPacket(ToSend, ToSend.length, this.ipAddress, this.portNumber); // Assume serverAddress and serverPort are set
 
-
-
-
-
-
-
-
-
-
+			socket.send(Data_packet);
+			System.out.println("CLIENT --> Metadata sent successfully: " + metaData.getName() + ", size: " + metaData.getSize() + ", Max Segment Size: " + metaData.getMaxSegSize());
 
 		} catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
+			System.err.println("CLIENT --> Error with sending metadata: " + e.getMessage());
+		} finally {
+			try {
+				if (objectOutputStream != null) {
+					objectOutputStream.close();
+				}
+				if (outputStream != null) {
+					outputStream.close();
+				}
+			} catch (IOException e) {
+				System.err.println("CLIENT: Error closing resources: " + e.getMessage());
+			}
+		}
+	}
+
 
 	/* 
 	 * This method:
@@ -117,10 +115,23 @@ public class Protocol {
 	 * set the checksum of the data segment.
 	 * The method returns -1 if this is the last data segment (no more data to be read) and 0 otherwise.
 	 */
-	public int readData() { 
-		System.exit(0);
-		return 0;
-	}
+	public int readData() throws IOException {
+		byte[] Buffer = new byte[maxPayload];
+		int ReadBytes = InputStream.nullInputStream().read(Buffer);
+		int sequenceNum = 0;
+
+		if (ReadBytes == -1) {
+			return -1;
+		}
+
+		dataSeg.setPayLoad(new String(Buffer, 0, ReadBytes));
+		dataSeg.setSize(ReadBytes);
+		dataSeg.setSq(sequenceNum++);
+
+		dataSeg.setType(SegmentType.Data);
+
+        return 0;
+    }
 
 	/* 
 	 * This method sends the current data segment (dataSeg) to the server 
