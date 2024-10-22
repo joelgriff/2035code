@@ -145,8 +145,28 @@ public class Protocol {
 	}
 
 
-	public void sendData()  {
-		System.exit(0);
+	public void sendData() throws IOException {
+		int CheckSum = checksum(dataSeg.getPayLoad(), false);
+		dataSeg.setChecksum(CheckSum);
+
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		ObjectOutputStream OOS = new ObjectOutputStream(outputStream);
+		OOS.writeObject(dataSeg);
+		byte[] ToSend = outputStream.toByteArray();
+
+		DatagramPacket PacketToSend = new DatagramPacket(ToSend, ToSend.length, ipAddress, portNumber);
+		socket.send(PacketToSend);
+		System.out.println("CLIENT --> Sent Segment with sq:" + dataSeg.getSq());
+		System.out.println("INFO: Size -->" + dataSeg.getSize());
+		System.out.println("INFO: Checksum -->" + dataSeg.getChecksum());
+
+		sentBytes += dataSeg.getSize();
+		totalSegments++;
+
+		remainingBytes -= dataSeg.getSize();
+
+		System.out.println("CLIENT --> Bytes sent so far: " + sentBytes);
+		System.out.println("CLIENT --> Bytes needing to be sent: " + remainingBytes);
 	} 
 
 
