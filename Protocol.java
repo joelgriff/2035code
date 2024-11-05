@@ -68,42 +68,28 @@ public class Protocol {
 	 * This method does not set any of the attributes of the protocol.
 	 */
 	public void sendMetadata() {
-		MetaData metaData = new MetaData();
-		metaData.setName(inputFileName);
-		metaData.setSize(fileSize);
-		metaData.setMaxSegSize(this.maxPayload);
 
-		ByteArrayOutputStream outputStream = null;
-		ObjectOutputStream objectOutputStream = null;
 		try {
+			MetaData metaData = new MetaData();
+			metaData.setName(outputFileName);
+			metaData.setSize(fileSize);
+			metaData.setMaxSegSize(maxPayload);
 
-			outputStream = new ByteArrayOutputStream();
-			objectOutputStream = new ObjectOutputStream(outputStream);
+			ByteArrayOutputStream OutputStream = new ByteArrayOutputStream();
+			ObjectOutputStream ObjectStream = new ObjectOutputStream(OutputStream);
+			ObjectStream.writeObject(metaData);
 
-			objectOutputStream.writeObject(metaData);
-			byte[] ToSend = outputStream.toByteArray();
-
-			DatagramPacket Data_packet = new DatagramPacket(ToSend, ToSend.length, this.ipAddress, this.portNumber); // Assume serverAddress and serverPort are set
-
-			socket.send(Data_packet);
-			System.out.println("CLIENT --> Metadata sent successfully: " + metaData.getName() + ", size: " + metaData.getSize() + ", Max Segment Size: " + metaData.getMaxSegSize());
-
+			byte[] bytes = OutputStream.toByteArray();
+			DatagramPacket DataPacket = new DatagramPacket(bytes, bytes.length, ipAddress, portNumber);
+			this.socket.send(DataPacket);
+			System.out.println("CLIENT --> Metadata sent successfully: ");
+			System.out.println("         File name: " + metaData.getName());
+			System.out.println("         Size: " + metaData.getSize() + " bytes");
+			System.out.println("         Max Segment Size: " + metaData.getMaxSegSize() + " bytes");
 		} catch (IOException e) {
-			System.err.println("CLIENT --> Error with sending metadata: " + e.getMessage());
-		} finally {
-			try {
-				if (objectOutputStream != null) {
-					objectOutputStream.close();
-				}
-				if (outputStream != null) {
-					outputStream.close();
-				}
-			} catch (IOException e) {
-				System.err.println("CLIENT --> Error with closing resources: " + e.getMessage());
-			}
+			System.out.println("ERROR --> Cannot send metadata  ");
 		}
 	}
-
 
 	/* 
 	 * This method:
@@ -115,60 +101,66 @@ public class Protocol {
 	 * set the checksum of the data segment.
 	 * The method returns -1 if this is the last data segment (no more data to be read) and 0 otherwise.
 	 */
-	public int readData() throws IOException {
-		byte[] TotalPayload = new byte[maxPayload];
-		int ReadBytes = InputStream.nullInputStream().read(TotalPayload);
-		int sequenceNum = 0;
 
-		if (ReadBytes == -1) {
+	public int readData() {
+		try {
+			FileInputStream InputFile = new FileInputStream(inputFile);
+			long BytePos = fileSize - remainingBytes;
+			InputFile.getChannel().position(BytePos);
+
+			byte[] ByteBuffer = new byte [maxPayload];
+			int readBytes = InputFile.read(ByteBuffer);
+
+
+			if (readBytes <= 0) {
+				return -1;
+			}
+
+			String Data = new String(ByteBuffer, 0, readBytes);
+			dataSeg.setType(SegmentType.Data);
+			dataSeg.setSize(readBytes);
+			dataSeg.setPayLoad(Data);
+
+			int currentSqNum = dataSeg.getSq();
+			dataSeg.setSq(1- currentSqNum);
+			remainingBytes = remainingBytes - readBytes;
+			totalSegments++;
+			InputFile.close();
+			return 0;
+
+        } catch (Exception e) {
+			System.err.println("ERROR --> Cannot read data");
 			return -1;
 		}
-
-		dataSeg.setPayLoad(new String(TotalPayload, 0, ReadBytes));
-		dataSeg.setSize(ReadBytes);
-		dataSeg.setSq(sequenceNum);
-		dataSeg.setType(SegmentType.Data);
-
-		sequenceNum = (sequenceNum + 1) % 2;
-        return 0;
     }
 
-	/* 
+	/*
 	 * This method sends the current data segment (dataSeg) to the server 
 	 * This method:
 	 * 		computes a checksum of the data and sets the data segment's checksum prior to sending. 
 	 * output relevant information messages for the user to follow progress of the file transfer.
 	 */
 
-	public Segment getCurrentSeg() {
-		return dataSeg;
+	public void sendData() {
+		try {
+			dataSeg.setChecksum(checksum(dataSeg.getPayLoad(), false));
+			ByteArrayOutputStream OutputStream = new ByteArrayOutputStream();
+			ObjectOutputStream ObjectStream = new ObjectOutputStream(OutputStream);
+			ObjectStream.writeObject(dataSeg);
+
+			byte[] totalBytes = OutputStream.toByteArray();
+
+			DatagramPacket DataPacket = new DatagramPacket(totalBytes, totalBytes.length, ipAddress, portNumber);
+			this.socket.send(DataPacket);
+			System.out.println("CLIENT --> Sending(sq):" + dataSeg.getSq());
+			System.out.println("CLIENT --> Sending(size):" + dataSeg.getSize());
+			System.out.println("CLIENT --> Sending(checksum):" + dataSeg.getChecksum());
+
+			sentBytes += dataSeg.getSize();
+		} catch (Exception e) {
+			System.err.println("ERROR --> Cannot send data");
+		}
 	}
-
-
-	public void sendData() throws IOException {
-		int CheckSum = checksum(dataSeg.getPayLoad(), false);
-		dataSeg.setChecksum(CheckSum);
-
-		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-		ObjectOutputStream OOS = new ObjectOutputStream(outputStream);
-		OOS.writeObject(dataSeg);
-		byte[] ToSend = outputStream.toByteArray();
-
-		DatagramPacket PacketToSend = new DatagramPacket(ToSend, ToSend.length, ipAddress, portNumber);
-		socket.send(PacketToSend);
-		System.out.println("CLIENT --> Sent Segment with sq:" + dataSeg.getSq());
-		System.out.println("INFO: Size -->" + dataSeg.getSize());
-		System.out.println("INFO: Checksum -->" + dataSeg.getChecksum());
-
-		sentBytes += dataSeg.getSize();
-		totalSegments++;
-
-		remainingBytes -= dataSeg.getSize();
-
-		System.out.println("CLIENT --> Bytes sent so far: " + sentBytes);
-		System.out.println("CLIENT --> Bytes needing to be sent: " + remainingBytes);
-	} 
-
 
 	//Decide on the right place to :
 	// *  	update the remaining bytes so that it records the remaining bytes to be read from the file after this segment is transferred. When all file bytes have been read, the remaining bytes will be zero
@@ -184,34 +176,30 @@ public class Protocol {
 	 * return true if no error
 	 * output relevant information messages for the user to follow progress of the file transfer.
 	 */
-	public boolean receiveAck(int expectedDataSq)  {
+	public boolean receiveAck(int expectedDataSq) {
 		try {
-			byte[] buffer = new byte[maxPayload];
+			byte[] buffer = new byte[1024];
 			DatagramPacket AckPacket = new DatagramPacket(buffer, buffer.length);
-
 			socket.receive(AckPacket);
 
-			ByteArrayInputStream ByteStream = new ByteArrayInputStream(buffer);
-			ObjectInputStream ObjectStream = new ObjectInputStream(ByteStream) ;
-			Segment AckSeg = (Segment) ObjectStream.readObject();
+			ByteArrayInputStream ByteStream = new ByteArrayInputStream(AckPacket.getData());
+			ObjectInputStream ObjectStream = new ObjectInputStream(ByteStream);
+			ackSeg = (Segment) ObjectStream.readObject();
 
-			if (ackSeg.getSq() == expectedDataSq) {
-				System.out.println("CLIENT --> Received correct Ack with sqNum: " + ackSeg.getSq());
-				return true;
-			} else {
-				System.err.println("ERROR!! --> Ack received with incorrect sqNum: " + ackSeg.getSq());
-				System.exit(1);
+			System.out.println("CLIENT --> Ack sq ==" + ackSeg.getSq() + "Received");
+			System.out.println("----------------");
+
+			if (ackSeg.getSq() != expectedDataSq) {
+				System.err.println("ERROR --> Unexpected sq number!");
+				System.exit(0);
 			}
 
+			return true;
 
-		} catch (IOException | ClassNotFoundException e) {
-			System.err.println("ERROR --> failed to receive Ack --> " + e.getMessage());
-            System.exit(1);
-        }
-
-		return false;
-
-	} 
+		} catch (Exception e) {
+			return false;
+		}
+	}
 
 	/* 
 	 * This method sends the current data segment (dataSeg) to the server with errors
@@ -291,7 +279,7 @@ public class Protocol {
 	 *      attributes, according to the normal file transfer without timeout
 	 *      or retransmission (for part 2).
 	 */
-	public void sendFileNormal() throws IOException { 
+	public void sendFileNormal() throws IOException {
 		while (this.remainingBytes!=0) {
 			readData(); 
 			sendData();
