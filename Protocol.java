@@ -185,8 +185,32 @@ public class Protocol {
 	 * output relevant information messages for the user to follow progress of the file transfer.
 	 */
 	public boolean receiveAck(int expectedDataSq)  {
-		System.exit(0);
+		try {
+			byte[] buffer = new byte[maxPayload];
+			DatagramPacket AckPacket = new DatagramPacket(buffer, buffer.length);
+
+			socket.receive(AckPacket);
+
+			ByteArrayInputStream ByteStream = new ByteArrayInputStream(buffer);
+			ObjectInputStream ObjectStream = new ObjectInputStream(ByteStream) ;
+			Segment AckSeg = (Segment) ObjectStream.readObject();
+
+			if (ackSeg.getSq() == expectedDataSq) {
+				System.out.println("CLIENT --> Received correct Ack with sqNum: " + ackSeg.getSq());
+				return true;
+			} else {
+				System.err.println("ERROR!! --> Ack received with incorrect sqNum: " + ackSeg.getSq());
+				System.exit(1);
+			}
+
+
+		} catch (IOException | ClassNotFoundException e) {
+			System.err.println("ERROR --> failed to receive Ack --> " + e.getMessage());
+            System.exit(1);
+        }
+
 		return false;
+
 	} 
 
 	/* 
