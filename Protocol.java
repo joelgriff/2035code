@@ -82,7 +82,7 @@ public class Protocol {
 			byte[] bytes = OutputStream.toByteArray();
 			DatagramPacket DataPacket = new DatagramPacket(bytes, bytes.length, ipAddress, portNumber);
 			this.socket.send(DataPacket);
-			System.out.println("CLIENT --> Metadata sent successfully: ");
+			System.out.println("SENDER --> Metadata sent successfully: ");
 			System.out.println("         File name: " + metaData.getName());
 			System.out.println("         Size: " + metaData.getSize() + " bytes");
 			System.out.println("         Max Segment Size: " + metaData.getMaxSegSize() + " bytes");
@@ -152,9 +152,10 @@ public class Protocol {
 
 			DatagramPacket DataPacket = new DatagramPacket(totalBytes, totalBytes.length, ipAddress, portNumber);
 			this.socket.send(DataPacket);
-			System.out.println("CLIENT --> Sending(sq):" + dataSeg.getSq());
-			System.out.println("CLIENT --> Sending(size):" + dataSeg.getSize());
-			System.out.println("CLIENT --> Sending(checksum):" + dataSeg.getChecksum());
+
+			System.out.println("SENDER --> Sending(sq):" + dataSeg.getSq());
+			System.out.println("SENDER --> Sending(size):" + dataSeg.getSize());
+			System.out.println("SENDER --> Sending(checksum):" + dataSeg.getChecksum());
 
 			sentBytes += dataSeg.getSize();
 		} catch (Exception e) {
@@ -186,7 +187,7 @@ public class Protocol {
 			ObjectInputStream ObjectStream = new ObjectInputStream(ByteStream);
 			ackSeg = (Segment) ObjectStream.readObject();
 
-			System.out.println("CLIENT --> Ack sq ==" + ackSeg.getSq() + "Received");
+			System.out.println("SENDER --> Ack sq ==" + ackSeg.getSq() + "Received");
 			System.out.println("----------------");
 
 			if (ackSeg.getSq() != expectedDataSq) {
@@ -223,9 +224,9 @@ public class Protocol {
 
 			if (isCorrupted(lossProb)) {
 				dataSeg.setChecksum(checksum(PayLoad, true));
-				System.out.println("CLIENT --> Corrupted segment");
+				System.out.println("SENDER --> Corrupt segment");
 			} else {
-				System.out.println("CLIENT --> Segment sent with original checksum");
+				System.out.println("SENDER --> Segment sent with original checksum");
 			}
 
 			ByteArrayOutputStream OutputStream = new ByteArrayOutputStream();
@@ -236,17 +237,17 @@ public class Protocol {
 			DatagramPacket DataPacket = new DatagramPacket(DataToSend, DataToSend.length, ipAddress, portNumber);
 			socket.send(DataPacket);
 
-			System.out.println("CLIENT --> Sending segment: sq: " + dataSeg.getSq());
-			System.out.println("CLIENT --> Sending size: " + dataSeg.getSize());
-			System.out.println("CLIENT --> Sending checksum: " + dataSeg.getChecksum());
+			System.out.println("SENDER --> Sending segment: sq: " + dataSeg.getSq());
+			System.out.println("SENDER --> Sending size: " + dataSeg.getSize());
+			System.out.println("SENDER --> Sending checksum: " + dataSeg.getChecksum());
 			System.out.println("--------------------");
 
 			if (dataSeg.getChecksum() == OriginalChecksum) {
 				SentSuccess = true;
-				System.out.println("CLIENT --> Segment sent without corruption");
+				System.out.println("SENDER --> Segment sent without corruption");
 			} else {
 				currRetry++;
-				System.out.println("CLIENT --> Current retry=" + currRetry + "--> CORRUPTED");
+				System.out.println("SENDER --> Current retry=" + currRetry + "--> CORRUPTED");
 			}
 
 			ObjectStream.close();
@@ -276,17 +277,14 @@ public class Protocol {
 	 * relevant methods that need to be used include: readData(), sendDataWithError(), receiveAck().
 	 */
 	void sendFileWithTimeout() {
-		int currRetry = 0; // Retry count for the current segment
-		int totalSegmentsSent = 0; // Total number of segments sent
-		int totalResent = 0; // Number of segments resent due to timeout or corruption
+		int currRetry = 0;
+		int totalSegmentsSent = 0;
+		int totalResent = 0;
+		int timeoutValue = DEFAULT_TIMEOUT;
 
-		// Set the socket timeout duration (in milliseconds)
-		int timeoutValue = 1000; // Timeout set to 1000 ms (1 second)
-
-		while (readData() != -1) { // Keep reading segments until end of file
+		while (readData() != -1) {
 			boolean ackReceived = false;
 
-			// Set socket timeout for receiving ACKs (this is a default timeout)
             try {
                 socket.setSoTimeout(timeoutValue);
             } catch (SocketException e) {
@@ -294,27 +292,24 @@ public class Protocol {
             }
 
             while (!ackReceived) {
-				// Send the data segment (with possible error corruption)
+
 				if (currRetry > 0) {
-					System.out.println("SENDER: TIMEOUT ALERT: Re-sending the same segment again, current retry: " + currRetry);
+					System.out.println("SENDER: TIMEOUT --> Re-sending the same segment --> retry: " + currRetry);
 				}
 
-				// Send data segment with potential corruption
                 try {
                     sendDataWithError();
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
                 totalSegmentsSent++;
-
-				// Print segment information: seq number, size, checksum, and content
 				System.out.println("SENDER: Sending segment: sq:" + dataSeg.getSq() +
 						", size:" + dataSeg.getSize() +
 						", checksum:" + dataSeg.getChecksum());
 				System.out.println("----------------------------------------");
 
-				// Attempt to receive acknowledgment from the server
-				long startTime = System.currentTimeMillis(); // Start time for tracking timeout
+
+				long startTime = System.currentTimeMillis();
 				long elapsedTime = 0;
 
 				while (!ackReceived && elapsedTime < timeoutValue) {
@@ -322,46 +317,52 @@ public class Protocol {
 					elapsedTime = currentTime - startTime;
 
 					if (elapsedTime < timeoutValue) {
-						ackReceived = receiveAck(dataSeg.getSq()); // Try receiving ACK
+						ackReceived = receiveAck(dataSeg.getSq());
 					} else {
-						// Timeout occurred, handle retransmission
-						System.out.println("TIMEOUT: ACK not received for segment with sequence number: " + dataSeg.getSq());
+						System.out.println("TIMEOUT: ACK not received with sq: " + dataSeg.getSq());
 						currRetry++;
 						totalResent++;
 
-						// Check if retries exceed the maximum allowed
 						if (currRetry > maxRetries) {
-							System.out.println("ERROR: Maximum retries exceeded for segment " + dataSeg.getSq());
-							System.out.println("Aborting transfer.");
-							return; // Exit the method due to excessive retries
+							System.out.println("ERROR: Max retries reached for segment " + dataSeg.getSq());
+							System.out.println("Aborted the transfer.");
+							return;
 						}
 
-						// Resend the data segment
-						System.out.println("Resending segment with sequence number: " + dataSeg.getSq());
-						break; // Exit the inner loop to resend the segment
+						System.out.println("Resending segment with sq: " + dataSeg.getSq());
+						break;
 					}
 				}
 
-				// Check if ACK was received successfully
 				if (ackReceived) {
 					System.out.println("SENDER: ACK sq= " + dataSeg.getSq() + " RECEIVED.");
-					currRetry = 0; // Reset retries after successful transmission
+					currRetry = 0;
 				}
 			}
 		}
 
-		// File transfer complete, print summary
 		System.out.println("Total Segments " + totalSegmentsSent);
-		System.out.println("Re-sent Segments " + totalResent);
+		System.out.println("Segments Resent " + totalResent);
 		System.out.println("SENDER: File is sent.");
 	}
 	/*
 	 *  transfer the given file using the resources provided by the protocol structure using GoBackN.
 	 */
-	void sendFileNormalGBN(int window) throws IOException
-	{  
-		System.exit(0);
-	}	
+
+	void sendFileNormalGBN(int window) throws IOException {
+		int TotalSegments = totalSegments;
+
+		int currentBaseSq = 0;
+		int nextSq = 0;
+		int ReceivedAcks = 0;
+
+		while (ReceivedAcks < TotalSegments) {
+			while (nextSq < currentBaseSq + window && nextSq < TotalSegments) {
+
+			}
+		}
+	}
+
 
 	/*************************************************************************************************************************************
 	 **************************************************************************************************************************************
