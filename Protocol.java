@@ -5,6 +5,7 @@
 
 import java.io.*;
 import java.net.*;
+import java.util.Arrays;
 
 public class Protocol {
 
@@ -25,10 +26,10 @@ public class Protocol {
 	private DatagramSocket socket;     // The socket that the client bind to
 	private String mode;               //mode of transfer normal/with timeout/GBN
 
-	private File inputFile;           // The client-side input file to transfer  
+	private File inputFile;           // The client-side input file to transfer
 	private String inputFileName;      // the name of the client-side input file for transfer to the server
 	private String outputFileName;    //the name of the output file to create on the server as a result of the file transfer
-	private long fileSize;            // the size of the client-side input file  
+	private long fileSize;            // the size of the client-side input file
 
 	private Segment dataSeg;         // the protocol data segment for sending segments with payload read from the input file to the server
 	private Segment ackSeg;           //the protocol ack segment for receiving ACKs from the server
@@ -71,9 +72,9 @@ public class Protocol {
 
 		try {
 			MetaData metaData = new MetaData();
-			metaData.setName(outputFileName);
-			metaData.setSize(fileSize);
-			metaData.setMaxSegSize(maxPayload);
+			metaData.setName(this.outputFileName);
+			metaData.setSize(this.fileSize);
+			metaData.setMaxSegSize(this.maxPayload);
 
 			ByteArrayOutputStream OutputStream = new ByteArrayOutputStream();
 			ObjectOutputStream ObjectStream = new ObjectOutputStream(OutputStream);
@@ -262,18 +263,18 @@ public class Protocol {
 		}
 	}
 
-	/* 
+	/*
 	 * This method transfers the given file using the resources provided by the protocol structure.
 	 *
-	 * This method is similar to the sendFileNormal method except that it resends data segments if no ACK for a segment is received from the server. 
+	 * This method is similar to the sendFileNormal method except that it resends data segments if no ACK for a segment is received from the server.
 	 * This method:
 	 *  simulates network corruption of some data segments by injecting corruption into segment checksums (using sendDataWithError() method).
-	 *  will timeout waiting for an ACK for a corrupted segment and will resend the same data segment. 
+	 *  will timeout waiting for an ACK for a corrupted segment and will resend the same data segment.
 	 *  updates attributes that record the progress of a file transfer. This includes the number of consecutive retries for each segment.
 	 *
 	 * output relevant information messages for the user to follow progress of the file transfer.
 	 * after completing the file transfer, display total segments transferred and the total number of resent segments
-	 * 
+	 *
 	 * relevant methods that need to be used include: readData(), sendDataWithError(), receiveAck().
 	 */
 	void sendFileWithTimeout() {
@@ -294,7 +295,7 @@ public class Protocol {
             while (!ackReceived) {
 
 				if (currRetry > 0) {
-					System.out.println("SENDER: TIMEOUT --> Re-sending the same segment --> retry: " + currRetry);
+					System.out.println("SENDER --> TIMEOUT --> Re-sending the same segment --> retry: " + currRetry);
 				}
 
                 try {
@@ -303,7 +304,7 @@ public class Protocol {
                     throw new RuntimeException(e);
                 }
                 totalSegmentsSent++;
-				System.out.println("SENDER: Sending segment: sq:" + dataSeg.getSq() +
+				System.out.println("SENDER --> Sending segment: sq:" + dataSeg.getSq() +
 						", size:" + dataSeg.getSize() +
 						", checksum:" + dataSeg.getChecksum());
 				System.out.println("----------------------------------------");
@@ -335,7 +336,7 @@ public class Protocol {
 				}
 
 				if (ackReceived) {
-					System.out.println("SENDER: ACK sq= " + dataSeg.getSq() + " RECEIVED.");
+					System.out.println("SENDER --> ACK sq= " + dataSeg.getSq() + " RECEIVED.");
 					currRetry = 0;
 				}
 			}
@@ -343,24 +344,56 @@ public class Protocol {
 
 		System.out.println("Total Segments " + totalSegmentsSent);
 		System.out.println("Segments Resent " + totalResent);
-		System.out.println("SENDER: File is sent.");
+		System.out.println("SENDER --> File is sent.");
 	}
 	/*
 	 *  transfer the given file using the resources provided by the protocol structure using GoBackN.
 	 */
 
 	void sendFileNormalGBN(int window) throws IOException {
-		int TotalSegments = totalSegments;
+		int totalSegments = (int) Math.ceil((float) fileSize / maxPayload);
+		int ackSegments = 0;
+		int currentSq = 0;
+		int[] windowArray = new int[window];
+		Arrays.fill(windowArray, -1);
 
-		int currentBaseSq = 0;
-		int nextSq = 0;
-		int ReceivedAcks = 0;
+		while (ackSegments < totalSegments) {
 
-		while (ReceivedAcks < TotalSegments) {
-			while (nextSq < currentBaseSq + window && nextSq < TotalSegments) {
-
+			for (int i = 0; i < window && currentSq < totalSegments; i++) {
+				readData();
+				dataSeg.setSq(currentSq % (window + 1));
+				sendData();
+				windowArray[i] = dataSeg.getSq();
+				System.out.println("SENDER --> Sent segment sq=" + dataSeg.getSq() + ", size=" + dataSeg.getSize());
+				currentSq++;
 			}
+
+			System.out.println("SENDER --> Current outstanding ACKs: " + Arrays.toString(windowArray));
+
+			if (receiveAck(windowArray[0])) {
+				for (int i = 1; i < windowArray.length; i++) {
+					windowArray[i - 1] = windowArray[i];
+				}
+				windowArray[windowArray.length - 1] = -1;
+				ackSegments++;
+
+				if (currentSq < totalSegments) {
+					System.out.println("SENDER --> Sliding window and sending next segment...");
+					readData();
+					dataSeg.setSq(currentSq % (window + 1));
+					windowArray[windowArray.length - 1] = dataSeg.getSq();
+					sendData();
+					System.out.println("SENDER --> Sent segment sq=" + dataSeg.getSq() + ", size=" + dataSeg.getSize());
+				}
+			} else {
+				System.out.println("SENDER --> ACK not received. Transfer aborted");
+				System.exit(1);
+			}
+			System.out.println("SENDER --> Total segments sent:" + totalSegments);
+			System.out.println("------------------------------------------------------------------");
 		}
+
+		System.out.println("SENDER --> File transfer complete. Total Segments sent: " + ackSegments);
 	}
 
 
@@ -370,8 +403,8 @@ public class Protocol {
 	These methods are implemented for you .. Do NOT Change them
 	 **************************************************************************************************************************************
 	 **************************************************************************************************************************************
-	 **************************************************************************************************************************************/	 
-	/* 
+	 **************************************************************************************************************************************/
+	/*
 	 * This method initialises ALL the 19 attributes needed to allow the Protocol methods to work properly
 	 */
 	public void initProtocol(String hostName , String portNumber, String fileName, String outputFileName, String payloadSize, String mode) throws UnknownHostException, SocketException {
@@ -396,7 +429,7 @@ public class Protocol {
 		this.lossProb =0;
 		this.totalSegments =0;
 		this.resentSegments = 0;
-		this.currRetry = 0;		
+		this.currRetry = 0;
 	}
 
 	/* transfer the given file using the resources provided by the protocol
@@ -405,25 +438,25 @@ public class Protocol {
 	 */
 	public void sendFileNormal() throws IOException {
 		while (this.remainingBytes!=0) {
-			readData(); 
+			readData();
 			sendData();
 			if(!receiveAck(this.dataSeg.getSq()))  System.exit(0);
 		}
-		System.out.println("Total Segments "+ this.totalSegments );  
+		System.out.println("Total Segments "+ this.totalSegments );
 	}
 
-	/* calculate the segment checksum by adding the payload 
+	/* calculate the segment checksum by adding the payload
 	 * Parameters:
 	 * payload - the payload string
 	 * corrupted - a boolean to indicate whether the checksum should be corrupted
-	 *      to simulate a network error 
+	 *      to simulate a network error
 	 *
 	 * Return:
 	 * An integer value calculated from the payload of a segment
 	 */
 	public static int checksum(String payload, Boolean corrupted)
 	{
-		if (!corrupted)  
+		if (!corrupted)
 		{
 			int i;
 
@@ -440,11 +473,11 @@ public class Protocol {
 		this.lossProb = loss;
 	}
 
-	/* 
-	 * returns true with the given probability 
-	 * 
-	 * The result can be passed to the checksum function to "corrupt" a 
-	 * checksum with the given probability to simulate network errors in 
+	/*
+	 * returns true with the given probability
+	 *
+	 * The result can be passed to the checksum function to "corrupt" a
+	 * checksum with the given probability to simulate network errors in
 	 * file transfer.
 	 *
 	 */
@@ -459,8 +492,8 @@ public class Protocol {
 	{
 		File file = new File(fileName);
 		if(!file.exists()) {
-			System.out.println("SENDER: File does not exists"); 
-			System.out.println("SENDER: Exit .."); 
+			System.out.println("SENDER: File does not exists");
+			System.out.println("SENDER: Exit ..");
 			System.exit(0);
 		}
 		return file;
